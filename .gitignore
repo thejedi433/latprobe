@@ -1,0 +1,4 @@
+bin/
+*.exe
+/latprobe
+coverage.out
