@@ -126,3 +126,17 @@ func TestPercentileClampsRank(t *testing.T) {
 		t.Errorf("negative p = %v, want min", got)
 	}
 }
+
+func TestPercentileSmallPositivePStaysInRange(t *testing.T) {
+	// A tiny positive p on a single sample makes the ceil formula truncate
+	// rank to 0; the clamp must lift it to 1 (first sample), not index -1.
+	one := []time.Duration{ms(7)}
+	if got := percentile(one, 0.5); got != ms(7) {
+		t.Errorf("percentile(one, 0.5) = %v, want %v", got, ms(7))
+	}
+	// Nearest-rank on 3 samples at p=33: ceil(3*33/100)=1 -> minimum.
+	vals := []time.Duration{ms(1), ms(2), ms(3)}
+	if got := percentile(vals, 33); got != ms(1) {
+		t.Errorf("nearest-rank p=33: got %v, want %v", got, ms(1))
+	}
+}

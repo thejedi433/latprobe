@@ -123,3 +123,28 @@ func TestDoTLSCertRejected(t *testing.T) {
 		t.Fatal("Do with self-signed cert and Insecure=false: want error")
 	}
 }
+
+func TestDoRecordsDNSTraceOnHostname(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	// The std test server binds 127.0.0.1; rewriting to the localhost
+	// hostname forces a real resolver lookup, which fires the DNSStart/
+	// DNSDone trace callbacks. (Loopback-IP URLs skip the resolver entirely,
+	// so the dns branch never runs there.)
+	hostURL := "http://localhost" + strings.TrimPrefix(ts.URL, "http://127.0.0.1")
+
+	c := New(Options{Timeout: 5 * time.Second})
+	smp, err := c.Do(context.Background(), hostURL)
+	if err != nil {
+		t.Fatalf("Do(%s): %v", hostURL, err)
+	}
+	if smp.DNS < 0 {
+		t.Fatalf("DNS = %v, want >= 0", smp.DNS)
+	}
+	if smp.Total <= 0 {
+		t.Fatalf("Total = %v, want > 0", smp.Total)
+	}
+}

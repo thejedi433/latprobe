@@ -128,3 +128,74 @@ func TestProbeURLStopsOnCancel(t *testing.T) {
 		t.Fatal("probeURL collected nothing before cancellation")
 	}
 }
+
+func TestRunRejectsUnknownFlag(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "out.txt")
+	out, err := os.Create(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	if err := run([]string{"-nope", "http://example.com"}, out); err == nil {
+		t.Fatal("run with unknown flag: want error")
+	}
+}
+
+func TestProbeURLPrintsProgressAndErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	tmp := filepath.Join(t.TempDir(), "out.txt")
+	out, err := os.Create(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+
+	c := NewForTest()
+	// Live server, quiet=false: one progress dot per sample.
+	probeURL(context.Background(), c, ts.URL, 2, time.Millisecond, false, out, testMu())
+	// Dead server: non-quiet path must print '!' and the sample error line.
+	ts.Close()
+	probeURL(context.Background(), c, ts.URL, 1, time.Millisecond, false, out, testMu())
+	_ = out.Sync()
+
+	data, _ := os.ReadFile(tmp)
+	got := string(data)
+	if !strings.Contains(got, "..") {
+		t.Errorf("want two progress dots for the live samples, got:\n%s", got)
+	}
+	if !strings.Contains(got, "!") {
+		t.Errorf("want '!' marker for the failed sample, got:\n%s", got)
+	}
+	if !strings.Contains(got, "sample 1 error:") {
+		t.Errorf("want sample error line, got:\n%s", got)
+	}
+}
+
+func TestProbeURLStopsBeforeFirstSampleWhenContextCanceled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tmp := filepath.Join(t.TempDir(), "out.txt")
+	out, err := os.Create(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+
+	// A dead transport URL proves Do was never called: a call would print
+	// '!' and an error line. Canceled ctx must short-circuit the loop first.
+	s := probeURL(ctx, NewForTest(), ts.URL, 5, 0, false, out, testMu())
+	if s.Count() != 0 {
+		t.Fatalf("canceled context: samples = %d, want 0", s.Count())
+	}
+	_ = out.Sync()
+	data, _ := os.ReadFile(tmp)
+	if strings.ContainsAny(string(data), "!") {
+		t.Errorf("canceled context: want zero requests, output:\n%s", data)
+	}
+}
